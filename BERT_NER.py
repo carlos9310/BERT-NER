@@ -252,9 +252,11 @@ def convert_single_example(ex_index, example, label_list, max_seq_length, tokeni
 
     """
     label_map = {}
+    id2key = {}
     #here start with zero this means that "[PAD]" is zero
     for (i,label) in enumerate(label_list):
         label_map[label] = i
+        id2key[i] = label
     with open(FLAGS.middle_output+"/label2id.pkl",'wb') as w:
         pickle.dump(label_map,w)
     textlist = example.text.split(' ')
@@ -309,6 +311,7 @@ def convert_single_example(ex_index, example, label_list, max_seq_length, tokeni
         logging.info("input_mask: %s" % " ".join([str(x) for x in mask]))
         logging.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
         logging.info("label_ids: %s" % " ".join([str(x) for x in label_ids]))
+        logging.info("labels: %s" % " ".join([str(id2key[x]) for x in label_ids]))
     feature = InputFeatures(
         input_ids=input_ids,
         mask=mask,
@@ -677,16 +680,16 @@ def main(_):
             is_training=False,
             drop_remainder=False)
         result = estimator.evaluate(input_fn=eval_input_fn)
-        output_eval_file = os.path.join(FLAGS.output_dir, "eval_results.txt")
-        with open(output_eval_file,"w") as wf:
-            logging.info("***** Eval results *****")
-            confusion_matrix = result["confusion_matrix"]
-            p,r,f = metrics.calculate(confusion_matrix,len(label_list)-1)
-            logging.info("***********************************************")
-            logging.info("********************P = %s*********************",  str(p))
-            logging.info("********************R = %s*********************",  str(r))
-            logging.info("********************F = %s*********************",  str(f))
-            logging.info("***********************************************")
+        # output_eval_file = os.path.join(FLAGS.output_dir, "eval_results.txt")
+        # with open(output_eval_file,"w") as wf:
+        logging.info("***** Eval results *****")
+        confusion_matrix = result["confusion_matrix"]
+        p,r,f = metrics.calculate(confusion_matrix,len(label_list)-1)
+        logging.info("***********************************************")
+        logging.info("********************P = %s*********************",  str(p))
+        logging.info("********************R = %s*********************",  str(r))
+        logging.info("********************F = %s*********************",  str(f))
+        logging.info("***********************************************")
 
 
     if FLAGS.do_predict:
