@@ -435,7 +435,7 @@ def create_model(bert_config, is_training, input_ids, mask,
         output_layer = tf.keras.layers.Dropout(rate=0.1)(output_layer)
     logits = hidden2tag(output_layer,num_labels)
     # TODO test shape
-    logits = tf.reshape(logits,[-1,FLAGS.max_seq_length,num_labels])
+    logits = tf.reshape(logits,[-1,FLAGS.max_seq_length,num_labels]) # 需要reshape?
     if FLAGS.crf:
         mask2len = tf.reduce_sum(mask,axis=1)
         loss, trans = crf_loss(logits,labels,mask,num_labels,mask2len)
@@ -473,20 +473,21 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
         initialized_variable_names=None
         if init_checkpoint:
             (assignment_map, initialized_variable_names) = modeling.get_assignment_map_from_checkpoint(tvars,init_checkpoint)
-            tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
+            # tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
             if use_tpu:
                 def tpu_scaffold():
                     tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
                     return tf.train.Scaffold()
                 scaffold_fn = tpu_scaffold
             else:
-
                 tf.train.init_from_checkpoint(init_checkpoint, assignment_map)
         logging.info("**** Trainable Variables ****")
         for var in tvars:
             init_string = ""
             if var.name in initialized_variable_names:
                 init_string = ", *INIT_FROM_CKPT*"
+            else:
+                init_string = ", *INIT_FROM_GRAPH*"
             logging.info("  name = %s, shape = %s%s", var.name, var.shape,
                             init_string)
 
@@ -614,7 +615,7 @@ def main(_):
 
     if FLAGS.do_train:
         train_file = os.path.join(FLAGS.output_dir, "train.tf_record")
-        _,_ = filed_based_convert_examples_to_features(
+        filed_based_convert_examples_to_features(
             train_examples, label_list, FLAGS.max_seq_length, tokenizer, train_file)
         logging.info("***** Running training *****")
         logging.info("  Num examples = %d", len(train_examples))
@@ -629,7 +630,7 @@ def main(_):
     if FLAGS.do_eval:
         eval_examples = processor.get_dev_examples(FLAGS.data_dir)
         eval_file = os.path.join(FLAGS.output_dir, "eval.tf_record")
-        batch_tokens,batch_labels = filed_based_convert_examples_to_features(
+        filed_based_convert_examples_to_features(
             eval_examples, label_list, FLAGS.max_seq_length, tokenizer, eval_file)
 
         logging.info("***** Running evaluation *****")
