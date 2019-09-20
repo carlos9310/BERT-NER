@@ -304,7 +304,7 @@ def convert_single_example(ex_index, example, label_list, max_seq_length, tokeni
         logging.info("*** Example ***")
         logging.info("guid: %s" % (example.guid))
         logging.info("tokens: %s" % " ".join(
-            [tokenization.printable_text(x) for x in tokens]))
+            [tokenization.printable_text(x) for x in ntokens]))
         logging.info("input_ids: %s" % " ".join([str(x) for x in input_ids]))
         logging.info("input_mask: %s" % " ".join([str(x) for x in mask]))
         logging.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
@@ -361,6 +361,7 @@ def file_based_input_fn_builder(input_file, seq_length, is_training, drop_remain
         return example
 
     def input_fn(params):
+        tf.logging.info(f'params in input_fu(params): {params}')
         batch_size = params["batch_size"]
         d = tf.data.TFRecordDataset(input_file)
         if is_training:
@@ -451,6 +452,9 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
                      use_one_hot_embeddings):
     def model_fn(features, labels, mode, params):
+
+        global_step = tf.train.get_global_step()
+
         logging.info("*** Features ***")
         for name in sorted(features.keys()):
             logging.info("  name = %s, shape = %s" % (name, features[name].shape))
@@ -468,6 +472,13 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
             (total_loss, logits, predicts) = create_model(bert_config, is_training, input_ids,
                                                             mask, segment_ids, label_ids,num_labels, 
                                                             use_one_hot_embeddings)
+
+        accuracy = tf.metrics.accuracy(
+            labels=features["label_ids"], predictions=predicts, name='acc')
+
+        stream_vars = [i for i in tf.local_variables()]
+        tf.logging.info(f'stream_vars:{stream_vars}')
+
         tvars = tf.trainable_variables()
         scaffold_fn = None
         initialized_variable_names=None
@@ -491,7 +502,17 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
             logging.info("  name = %s, shape = %s%s", var.name, var.shape,
                             init_string)
 
-        
+        tensors_log = {'loss': total_loss,
+                       'acc': accuracy[1],
+                       'total': stream_vars[1],
+                       'count': stream_vars[0],
+                       # 'logits': logits,
+                       'global_step': global_step,
+                       'learning_rate': tf.convert_to_tensor(learning_rate),
+                       'real_ids': features["label_ids"],
+                       'predicted_ids': predicts}
+        training_hooks = tf.train.LoggingTensorHook(
+            tensors=tensors_log, every_n_iter=1)
 
         if mode == tf.estimator.ModeKeys.TRAIN:
             train_op = optimization.create_optimizer(total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
@@ -499,25 +520,36 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                 mode=mode,
                 loss=total_loss,
                 train_op=train_op,
-                scaffold_fn=scaffold_fn)
+                scaffold_fn=scaffold_fn,
+                training_hooks=[training_hooks])
 
         elif mode == tf.estimator.ModeKeys.EVAL:
             def metric_fn(label_ids, logits,num_labels,mask):
                 predictions = tf.math.argmax(logits, axis=-1, output_type=tf.int32)
                 cm = metrics.streaming_confusion_matrix(label_ids, predictions, num_labels-1, weights=mask)
+
+                accuracy = tf.metrics.accuracy(
+                    labels=label_ids, predictions=predictions, weights=mask)
+
+                precision = tf.metrics.precision(labels=label_ids, predictions=predictions, weights=mask)
+                recall = tf.metrics.recall(labels=label_ids, predictions=predictions, weights=mask)
+
                 return {
-                    "confusion_matrix":cm
+                    "confusion_matrix": cm,
+                    "eval_accuracy": accuracy,
+                    "eval_precision": precision,
+                    "eval_recall": recall,
                 }
-                #
             eval_metrics = (metric_fn, [label_ids, logits, num_labels, mask])
             output_spec = tf.contrib.tpu.TPUEstimatorSpec(
                 mode=mode,
                 loss=total_loss,
                 eval_metrics=eval_metrics,
+                evaluation_hooks=[training_hooks],
                 scaffold_fn=scaffold_fn)
         else:
             output_spec = tf.contrib.tpu.TPUEstimatorSpec(
-                mode=mode, predictions=predicts, scaffold_fn=scaffold_fn
+                mode=mode, predictions=predicts, scaffold_fn=scaffold_fn, prediction_hooks=[training_hooks],
             )
         return output_spec
 
